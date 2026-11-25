@@ -51,6 +51,8 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
     return result;
   };
   try {
+    if (!ts.sys.directoryExists(root))
+      throw new Error(`Analysis root must be an existing directory: ${root}`);
     for (const [name, value] of [
       ["maxFiles", options.maxFiles],
       ["maxReferences", options.maxReferences],

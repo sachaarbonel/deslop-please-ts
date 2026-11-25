@@ -360,3 +360,33 @@ test("baseline writes refuse unrelated files and read/write modes are exclusive"
   assert.match(conflicting.stderr, /mutually exclusive/);
   assert.equal(existsSync(join(root, "new.json")), false);
 });
+
+test("invalid analysis roots fail in normal, report-only and baseline-writing modes", (t) => {
+  const { root, project } = fixture(t, { "main.ts": "export const value = 1;" });
+  const checks = [];
+  for (const [kind, invalidRoot] of [
+    ["missing", join(root, "missing-directory")],
+    ["file", join(root, "main.ts")],
+  ]) {
+    for (const mode of ["normal", "report-only", "write-baseline"]) {
+      const file = join(root, `${kind}-${mode}-baseline.json`);
+      const args = ["--project", project, "--root", invalidRoot];
+      if (mode === "report-only") args.push("--report-only");
+      if (mode === "write-baseline") args.push("--write-baseline", file);
+      const result = json(args);
+      checks.push({
+        kind,
+        mode,
+        status: result.status,
+        analysisError: result.report.errors.some((error) => error.kind === "analysis"),
+        baselineExists: existsSync(file),
+      });
+    }
+  }
+  for (const check of checks) {
+    const evidence = JSON.stringify(checks, null, 2);
+    assert.equal(check.status, 2, evidence);
+    assert.equal(check.analysisError, true, evidence);
+    assert.equal(check.baselineExists, false, evidence);
+  }
+});

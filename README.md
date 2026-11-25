@@ -26,11 +26,11 @@ Run one analysis for each intended TypeScript project. The linter reads that pro
 
 `--root` sets one analysis boundary relative to the working directory. Each repeated `--exclude` is a file or directory prefix relative to each project's configuration directory. Explicit exclusions and their file count appear in the CLI report; compiler errors in excluded imports still fail analysis.
 
-| Exit code | Meaning                                                                                                         |
-| --------- | --------------------------------------------------------------------------------------------------------------- |
-| `0`       | No error-severity findings, or `--report-only`; advisory findings can remain.                                   |
-| `1`       | Architectural error-severity findings, or new error-severity findings with a baseline.                          |
-| `2`       | Invalid arguments, configuration/compiler errors, or incomplete/failed analysis, including in report-only mode. |
+| Exit code | Meaning                                                                                                                 |
+| --------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `0`       | No new error-severity findings, `--report-only`, or a successful explicit baseline write; advisory findings can remain. |
+| `1`       | Architectural error-severity findings, or new error-severity findings with a baseline.                                  |
+| `2`       | Invalid arguments, configuration/compiler errors, or incomplete/failed analysis, including in report-only mode.         |
 
 ## Rules
 
@@ -64,7 +64,7 @@ npx deslop-please-ts --project tsconfig.json --write-baseline architecture-basel
 npx deslop-please-ts --project tsconfig.json --baseline architecture-baseline.json --format json
 ```
 
-Both commands retain every finding. With `--baseline`, diagnostics are annotated `known` or `new`; only new error-severity findings cause exit 1. Reports also list resolved identities. Compiler, configuration, analysis, and baseline errors still cause exit 2, including with `--report-only`.
+Both commands retain every finding. With `--baseline`, diagnostics are annotated `known` or `new`; only new error-severity findings cause exit 1. Reports also list resolved identities: previous entries absent in a successfully analyzed scope, including identities replaced by compiler or severity changes. This does not by itself establish that a defect was fixed. Compiler, configuration, analysis, and baseline errors still cause exit 2, including with `--report-only`.
 
 Baseline version 1 stores `{ kind: "deslop-please-ts-baseline", version: 1, entries: [...] }`. Each entry identifies a project, analysis root, compiler version, rule, stable key, and severity. Project and root paths are relative to the baseline file so the checkout can move. Changed keys, compiler versions, or severities are new findings even when the total count stays unchanged. Diagnostic keys identify architectural groups rather than every edge; this is a ratchet on finding identities, not proof that a known group has not grown.
 
