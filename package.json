@@ -1,0 +1,49 @@
+{
+  "name": "deslop-please-ts",
+  "version": "0.1.0",
+  "description": "Compiler-aware TypeScript architectural checks for deep modules and narrow interfaces",
+  "homepage": "https://github.com/Etolith/deslop-please-ts#readme",
+  "bugs": {
+    "url": "https://github.com/Etolith/deslop-please-ts/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Etolith/deslop-please-ts.git"
+  },
+  "bin": {
+    "deslop-please-ts": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "commonjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run format:check && npm test",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "oxfmt": "0.71.0"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
