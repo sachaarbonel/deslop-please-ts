@@ -1,9 +1,9 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 export function fixture(t, files, compilerOptions = {}) {
-  const root = mkdtempSync(join(tmpdir(), "deslop-please-ts-test-"));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "deslop-please-ts-test-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(
     join(root, "tsconfig.json"),

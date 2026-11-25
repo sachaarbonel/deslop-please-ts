@@ -128,3 +128,58 @@ export function edit(meter: Meter) { meter.score++; }`,
     }
   }
 });
+
+test("chained unchanged setters expose the final field without attributing getter reads as writes", (t) => {
+  const result = report(t, {
+    "meter.ts": `export class Meter {
+  private value = 0;
+  private limit = 4;
+  advance() { if (this.value < this.limit) this.value += 1; }
+  get first() { return this.value + 1; }
+  set first(value: number) { this.second = value; }
+  set second(value: number) { this.value = value; }
+  get second() { return this.value + 2; }
+}`,
+    "app.ts": `import { Meter } from './meter';
+export function read(meter: Meter) { return meter.first; }
+export function edit(meter: Meter) { meter.first = 3; }`,
+  });
+  const leaks = findings(result, "field-leak");
+  assert.equal(leaks.length, 1);
+  assert.equal(leaks[0].key, "meter.ts#Meter#value");
+  assert.equal(leaks[0].evidence.references, 1);
+  assert.equal(leaks[0].related[0].location.line, 3);
+  assert.match(leaks[0].related[0].message, /first@set/);
+});
+
+test("setter forwarding stops at an argument transformation or a transforming setter body", (t) => {
+  for (const transformedOuter of [false, true]) {
+    const result = report(t, {
+      "meter.ts": `export class Meter {
+  private value = 0;
+  private limit = 4;
+  advance() { if (this.value < this.limit) this.value += 1; }
+  set first(value: number) { this.second = ${transformedOuter ? "Math.max(0, value)" : "value"}; }
+  set second(value: number) { this.value = ${transformedOuter ? "value" : "Math.min(value, this.limit)"}; }
+}`,
+      "app.ts": `import { Meter } from './meter';
+export function edit(meter: Meter) { meter.first = 3; }`,
+    });
+    assert.deepEqual(findings(result, "field-leak"), [], `transformedOuter=${transformedOuter}`);
+  }
+});
+
+test("cyclic setter forwarding terminates analysis without inventing a backing-field exposure", (t) => {
+  const result = report(t, {
+    "meter.ts": `export class Meter {
+  private value = 0;
+  private limit = 4;
+  advance() { if (this.value < this.limit) this.value += 1; }
+  set first(value: number) { this.second = value; }
+  set second(value: number) { this.first = value; }
+}`,
+    "app.ts": `import { Meter } from './meter';
+export function edit(meter: Meter) { meter.first = 3; }`,
+  });
+  assert.deepEqual(findings(result, "field-leak"), []);
+});

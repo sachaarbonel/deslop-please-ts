@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         node: [22.12.0, 24]
-        typescript: [5.9.3, 6.0.3]
+        typescript: [5.8.2, 5.9.2, 6.0.3]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

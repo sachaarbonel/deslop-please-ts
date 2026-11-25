@@ -6,12 +6,12 @@ This is an independent TypeScript adaptation of [deterministic-machines/deslop-p
 
 Upstream attribution: **Copyright (c) 2026 Deterministic Machines, Inc.** The complete MIT copyright, permission, and disclaimer notice is preserved in [LICENSE](LICENSE).
 
-Requires Node.js **22.12 or newer**. TypeScript is a peer dependency; supported compiler families are **5.9.x (from 5.9.3)** and **6.0.x (from 6.0.3)**. CI tests both starting versions on Node 22.12 and 24.
+Requires Node.js **22.12 or newer**. TypeScript is a peer dependency supporting **>=5.8 <7**. CI tests 5.8.2, 5.9.2, and 6.0.3 on Node 22.12 and 24.
 
 ## Install and run
 
 ```sh
-npm install --save-dev https://github.com/sachaarbonel/deslop-please-ts/releases/download/v0.2.0/deslop-please-ts-0.2.0.tgz
+npm install --save-dev https://github.com/sachaarbonel/deslop-please-ts/releases/download/v0.2.1/deslop-please-ts-0.2.1.tgz
 npx deslop-please-ts --project tsconfig.json
 npx deslop-please-ts --project packages/api/tsconfig.json --project packages/web/tsconfig.json --format json
 npx deslop-please-ts --project tsconfig.json --report-only
@@ -51,7 +51,7 @@ Ordinary imports contribute runtime dependency evidence when their imported valu
 
 Like upstream's sibling-module check, `module-cycle` projects a dependency onto the sibling children of its least common directory. A cycle between directories can therefore exist while the individual files or declarations form a chain. Diagnostic `evidence.graph` distinguishes `sibling-directory` from `source-file`. Both are source-coupling graphs, not JavaScript module-evaluation graphs: a member read on an injected object can refer to its declaration's module even when that declaration was imported with `import type`. This records representation coupling without establishing a circular runtime import or initialization failure. Under `verbatimModuleSyntax`, inline type-only specifiers in an otherwise ordinary export declaration can leave a runtime `export {} from ...` relay, and that retained dependency participates.
 
-Source files are taken from the compiler program and filtered to the analysis root. Declaration files and dependency directories are omitted. Configured compiler output directories (`outDir` and `declarationDir`), generated/cache directories (`generated`, `__generated__`, `.next`, `.nuxt`, `.turbo`, `coverage`), generated filename markers, and a leading `@generated` comment header are omitted. A directory named `build` or `dist` is not automatically excluded when it is legitimate source. Filtering does not rewrite the project's compiler settings: compiler diagnostics can still reveal a broken imported or generated dependency.
+Source files are taken from the compiler program and filtered to the physical analysis root. Locations, declaration keys, test classification, and directory projections use physical paths even with `preserveSymlinks: true`; compiler AST and symbol identities are preserved. Declaration files and dependency directories are omitted. Configured compiler output directories (`outDir` and `declarationDir`), generated/cache directories (`generated`, `__generated__`, `.next`, `.nuxt`, `.turbo`, `coverage`), generated filename markers, and a leading `@generated` comment header are omitted. A directory named `build` or `dist` is not automatically excluded when it is legitimate source. Filtering does not rewrite the project's compiler settings: compiler diagnostics can still reveal a broken imported or generated dependency.
 
 Files named `*.test.*` or `*.spec.*`, and files under `test`, `tests`, `__tests__`, or `__mocks__`, remain in the analyzed file and layout counts. They do not contribute production coupling evidence. The report records their number in `testFiles` and separately counts ignored dependency, declaration, generated, and configured files in `ignored`.
 
@@ -68,7 +68,7 @@ Both commands retain every finding. With `--baseline`, diagnostics are annotated
 
 Baseline version 1 stores `{ kind: "deslop-please-ts-baseline", version: 1, entries: [...] }`. Each entry identifies a project, analysis root, compiler version, rule, stable key, and severity. Project and root paths are relative to the baseline file so the checkout can move. Changed keys, compiler versions, or severities are new findings even when the total count stays unchanged. Diagnostic keys identify architectural groups rather than every edge; this is a ratchet on finding identities, not proof that a known group has not grown.
 
-Reads never update the baseline. `--write-baseline` is mutually exclusive with `--baseline`, refuses writes whenever the `CI` environment variable is present, and cannot write incomplete analysis or replace an unrelated file. When updating selected projects, it preserves entries for other project/root scopes. Use consistent roots and exclusions when comparing runs, and review baseline changes as accepted debt rather than automatically regenerating them in CI.
+Reads never update the baseline. `--write-baseline` is mutually exclusive with `--baseline`, refuses writes whenever the `CI` environment variable is present (including `CI=false` or an empty value), and cannot write incomplete analysis or replace an unrelated file. When updating selected projects, it preserves entries for other project/root scopes. Use consistent roots and exclusions when comparing runs, and review baseline changes as accepted debt rather than automatically regenerating them in CI.
 
 ## Programmatic API
 

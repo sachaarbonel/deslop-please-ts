@@ -300,11 +300,12 @@ export function buildModel(
   files: ts.SourceFile[],
   options: AnalyzeOptions,
   reportingRoot: string,
+  sourcePath: (file: ts.SourceFile) => string,
 ): Model {
   const checker = program.getTypeChecker();
   const fileSet = new Set(files);
   const tests = new Set(
-    files.filter((file) => isTest(path.relative(reportingRoot, file.fileName))),
+    files.filter((file) => isTest(path.relative(reportingRoot, sourcePath(file)))),
   );
   const items: Item[] = [];
   const bySymbol = new Map<ts.Symbol, Item>();
@@ -361,7 +362,7 @@ export function buildModel(
     const file = node.getSourceFile();
     const position = file.getLineAndCharacterOfPosition(node.getStart(file));
     return {
-      file: slash(path.relative(reportingRoot, file.fileName)),
+      file: slash(path.relative(reportingRoot, sourcePath(file))),
       line: position.line + 1,
       column: position.character + 1,
     };
@@ -468,7 +469,7 @@ export function buildModel(
           const parent = topLevel(node) ? undefined : owner;
           const baseKey = parent
             ? `${parent.key}#${name}`
-            : `${slash(path.relative(reportingRoot, file.fileName))}#${name}`;
+            : `${slash(path.relative(reportingRoot, sourcePath(file)))}#${name}`;
           const key = accessor ? `${baseKey}@${accessor}` : baseKey;
           const item: Item = { key, name, kind, node, file, ...(parent ? { owner: parent } : {}) };
           items.push(item);
@@ -553,7 +554,8 @@ export function buildModel(
       const field = itemAt(expression.left.name);
       const parameter = parameters?.length === 1 ? parameters[0] : undefined;
       if (
-        field?.kind === "field" &&
+        field &&
+        (field.kind === "field" || ts.isSetAccessorDeclaration(field.node)) &&
         rootItem(field) === rootItem(item) &&
         parameter &&
         ts.isIdentifier(parameter.name) &&

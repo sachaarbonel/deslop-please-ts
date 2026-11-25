@@ -22,6 +22,15 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
     : requested;
   const configRoot = path.dirname(project);
   const root = path.resolve(options.root ?? configRoot);
+  const paths = new Map<string, string>();
+  const physicalPath = (file: string): string => {
+    const existing = paths.get(file);
+    if (existing !== undefined) return existing;
+    const resolved = ts.sys.realpath?.(file) ?? file;
+    paths.set(file, resolved);
+    return resolved;
+  };
+  const sourcePath = (file: ts.SourceFile): string => physicalPath(file.fileName);
   const report: Report = {
     version: 1,
     compilerVersion: ts.version,
@@ -43,7 +52,7 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
     if (diagnostic.file && diagnostic.start !== undefined) {
       const location = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
       result.location = {
-        file: slash(path.relative(root, diagnostic.file.fileName)),
+        file: slash(path.relative(report.root, sourcePath(diagnostic.file))),
         line: location.line + 1,
         column: location.character + 1,
       };
@@ -53,6 +62,8 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
   try {
     if (!ts.sys.directoryExists(root))
       throw new Error(`Analysis root must be an existing directory: ${root}`);
+    report.root = physicalPath(root);
+    report.project = physicalPath(project);
     for (const [name, value] of [
       ["maxFiles", options.maxFiles],
       ["maxReferences", options.maxReferences],
@@ -88,8 +99,7 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
         .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
         .map((diagnostic) => error(diagnostic, "compiler")),
     );
-    const physicalPath = (file: string): string => ts.sys.realpath?.(file) ?? file;
-    const physicalRoot = physicalPath(root);
+    const physicalRoot = report.root;
     const outputDirectories = [parsed.options.outDir, parsed.options.declarationDir]
       .filter((directory): directory is string => Boolean(directory))
       .map(physicalPath);
@@ -102,7 +112,7 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
         // The compiler marks bare package imports external even for a linked
         // workspace's own source. Physical ownership is the boundary; retain
         // the original SourceFile so compiler symbol identity stays intact.
-        const physicalFile = physicalPath(file.fileName);
+        const physicalFile = sourcePath(file);
         const name = slash(physicalFile);
         if (/(?:^|\/)node_modules\//.test(name) || !within(physicalFile, physicalRoot)) {
           report.ignored.dependencies++;
@@ -133,16 +143,21 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
         }
         return true;
       })
-      .sort((a, b) => (a.fileName < b.fileName ? -1 : a.fileName > b.fileName ? 1 : 0));
+      .sort((a, b) => (sourcePath(a) < sourcePath(b) ? -1 : sourcePath(a) > sourcePath(b) ? 1 : 0));
     report.files = files.length;
-    report.testFiles = files.filter((file) => isTest(path.relative(root, file.fileName))).length;
+    report.testFiles = files.filter((file) =>
+      isTest(path.relative(physicalRoot, sourcePath(file))),
+    ).length;
     if (files.length > maxFiles)
       throw new Error(`File work limit exceeded (${maxFiles}) including imported sources`);
-    const model = buildModel(program, files, options, root);
+    const model = buildModel(program, files, options, physicalRoot, sourcePath);
     const runtime = new Set<string>();
     const typeOnly = new Set<string>();
-    for (const edge of model.modules)
-      (edge.typeOnly ? typeOnly : runtime).add(`${edge.from.fileName}\0${edge.to.fileName}`);
+    for (const edge of model.modules) {
+      const from = sourcePath(edge.from);
+      const to = sourcePath(edge.to);
+      if (from !== to) (edge.typeOnly ? typeOnly : runtime).add(`${from}\0${to}`);
+    }
     report.dependencies = { runtime: runtime.size, typeOnly: typeOnly.size };
     report.diagnostics = check(model);
   } catch (cause) {
