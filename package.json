@@ -2,14 +2,14 @@
   "name": "deslop-please-ts",
   "version": "0.1.0",
   "description": "Compiler-aware TypeScript architectural checks for deep modules and narrow interfaces",
-  "homepage": "https://github.com/Etolith/deslop-please-ts#readme",
+  "homepage": "https://github.com/sachaarbonel/deslop-please-ts#readme",
   "bugs": {
-    "url": "https://github.com/Etolith/deslop-please-ts/issues"
+    "url": "https://github.com/sachaarbonel/deslop-please-ts/issues"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Etolith/deslop-please-ts.git"
+    "url": "git+https://github.com/sachaarbonel/deslop-please-ts.git"
   },
   "bin": {
     "deslop-please-ts": "dist/cli.js"

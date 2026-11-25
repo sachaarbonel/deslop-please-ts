@@ -35,7 +35,7 @@ Requires Node.js **22.12 or newer**. The runtime compiler dependency is pinned t
 ## Install and run
 
 ```sh
-npm install --save-dev https://github.com/Etolith/deslop-please-ts/releases/download/v0.1.0/deslop-please-ts-0.1.0.tgz
+npm install --save-dev https://github.com/sachaarbonel/deslop-please-ts/releases/download/v0.1.0/deslop-please-ts-0.1.0.tgz
 npx deslop-please-ts --project tsconfig.json
 npx deslop-please-ts --project packages/api/tsconfig.json --project packages/web/tsconfig.json --format json
 npx deslop-please-ts --project tsconfig.json --report-only

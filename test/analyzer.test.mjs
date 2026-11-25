@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -51,6 +51,67 @@ export function left(n: number): number { return n > 0 ? right(n - 1) : n; }
 export function right(n: number): number { return n > 0 ? left(n - 1) : n; }
 `,
 };
+
+test("symlinked workspace source inside the selected root participates in cycles", (t) => {
+  for (const preserveSymlinks of [false, true]) {
+    const { root, project } = fixture(
+      t,
+      {
+        "apps/main.ts": `import { libStep, libValue } from 'fixture-library';
+export const appValue = libValue;
+export function step(n: number): number { return n > 0 ? libStep(n - 1) : appValue; }`,
+        "packages/library/index.ts": `import { step } from '../../apps/main';
+export const libValue = 1;
+export function libStep(n: number): number { return n > 0 ? step(n - 1) : libValue; }`,
+        "packages/library/package.json": JSON.stringify({
+          name: "fixture-library",
+          types: "./index.ts",
+        }),
+      },
+      { preserveSymlinks },
+    );
+    const config = JSON.parse(readFileSync(project, "utf8"));
+    config.include = ["apps/*.ts"];
+    writeFileSync(project, JSON.stringify(config));
+    mkdirSync(join(root, "node_modules"));
+    symlinkSync(join(root, "packages/library"), join(root, "node_modules/fixture-library"), "dir");
+    const report = check(project, { root });
+    assert.equal(report.files, 2, `preserveSymlinks=${preserveSymlinks}`);
+    assert.equal(rule(report, "module-cycle").length, 1);
+    assert.equal(rule(report, "tangle").length, 1);
+    assert.ok(report.dependencies.runtime >= 2);
+  }
+});
+
+test("packages physically outside the selected root or inside node_modules stay excluded", (t) => {
+  const { root, project } = fixture(t, {
+    "apps/main.ts": `import { outsideRead } from 'fixture-outside';
+import { vendorRead } from 'fixture-vendor';
+export function appRead(n: number): number { return n > 0 ? outsideRead(n - 1) + vendorRead(n - 1) : 1; }`,
+    "node_modules/fixture-vendor/package.json": JSON.stringify({
+      name: "fixture-vendor",
+      types: "./index.ts",
+    }),
+    "node_modules/fixture-vendor/index.ts": `import { appRead } from '../../apps/main';
+export function vendorRead(n: number): number { return n > 0 ? appRead(n - 1) : 1; }`,
+  });
+  const outside = mkdtempSync(join(tmpdir(), "deslop-please-external-"));
+  t.after(() => rmSync(outside, { recursive: true, force: true }));
+  writeFileSync(
+    join(outside, "package.json"),
+    JSON.stringify({ name: "fixture-outside", types: "./index.ts" }),
+  );
+  const main = relative(outside, join(root, "apps/main")).split("\\").join("/");
+  writeFileSync(
+    join(outside, "index.ts"),
+    `import { appRead } from '${main}';
+export function outsideRead(n: number): number { return n > 0 ? appRead(n - 1) : 1; }`,
+  );
+  symlinkSync(outside, join(root, "node_modules/fixture-outside"), "dir");
+  const report = check(project, { root });
+  assert.equal(report.files, 1);
+  assert.deepEqual(report.diagnostics, []);
+});
 
 test("a consumed barrel relay preserves a runtime cycle even when declarations form a chain", (t) => {
   const { project } = fixture(t, {

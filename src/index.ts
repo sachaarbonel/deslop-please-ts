@@ -85,19 +85,23 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
         .filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)
         .map((diagnostic) => error(diagnostic, "compiler")),
     );
-    const outputDirectories = [parsed.options.outDir, parsed.options.declarationDir].filter(
-      (directory): directory is string => Boolean(directory),
+    const physicalPath = (file: string): string => ts.sys.realpath?.(file) ?? file;
+    const physicalRoot = physicalPath(root);
+    const outputDirectories = [parsed.options.outDir, parsed.options.declarationDir]
+      .filter((directory): directory is string => Boolean(directory))
+      .map(physicalPath);
+    const excluded = (options.exclude ?? []).map((prefix) =>
+      physicalPath(path.resolve(configRoot, prefix)),
     );
-    const excluded = (options.exclude ?? []).map((prefix) => path.resolve(configRoot, prefix));
     const files = program
       .getSourceFiles()
       .filter((file) => {
-        const name = slash(file.fileName);
-        if (
-          program.isSourceFileFromExternalLibrary(file) ||
-          /(?:^|\/)node_modules\//.test(name) ||
-          !within(file.fileName, root)
-        ) {
+        // The compiler marks bare package imports external even for a linked
+        // workspace's own source. Physical ownership is the boundary; retain
+        // the original SourceFile so compiler symbol identity stays intact.
+        const physicalFile = physicalPath(file.fileName);
+        const name = slash(physicalFile);
+        if (/(?:^|\/)node_modules\//.test(name) || !within(physicalFile, physicalRoot)) {
           report.ignored.dependencies++;
           return false;
         }
@@ -105,7 +109,7 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
           report.ignored.declarations++;
           return false;
         }
-        if (excluded.some((prefix) => within(file.fileName, prefix))) {
+        if (excluded.some((prefix) => within(physicalFile, prefix))) {
           report.ignored.configured++;
           return false;
         }
@@ -114,9 +118,9 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
           /@generated\b/.test(file.text.slice(range.pos, range.end)),
         );
         if (
-          outputDirectories.some((directory) => within(file.fileName, directory)) ||
+          outputDirectories.some((directory) => within(physicalFile, directory)) ||
           /(?:^|\/)(?:__generated__|generated|\.next|\.nuxt|\.turbo|coverage)\//.test(
-            slash(path.relative(root, file.fileName)),
+            slash(path.relative(physicalRoot, physicalFile)),
           ) ||
           /\.generated\.[^.]+$/.test(name) ||
           generatedHeader
