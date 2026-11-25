@@ -173,9 +173,17 @@ function isTypeReference(node: ts.Node): boolean {
   while (at.parent) {
     if (ts.isExpressionWithTypeArguments(at.parent)) {
       const heritage = at.parent.parent;
-      return ts.isHeritageClause(heritage) && heritage.token === ts.SyntaxKind.ImplementsKeyword;
+      return (
+        ts.isHeritageClause(heritage) &&
+        (heritage.token === ts.SyntaxKind.ImplementsKeyword ||
+          ts.isInterfaceDeclaration(heritage.parent))
+      );
     }
     if (ts.isTypeNode(at.parent)) return true;
+    if (ts.isPropertyAccessExpression(at.parent) || ts.isQualifiedName(at.parent)) {
+      at = at.parent;
+      continue;
+    }
     if (ts.isExpression(at.parent) || ts.isStatement(at.parent) || ts.isSourceFile(at.parent))
       return false;
     at = at.parent;
@@ -183,11 +191,53 @@ function isTypeReference(node: ts.Node): boolean {
   return false;
 }
 
-function useExpression(node: ts.Node): ts.Expression | undefined {
+function useExpression(node: ts.Node, callResult = false): ts.Expression | undefined {
   const parent = node.parent;
-  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return parent;
-  if (ts.isElementAccessExpression(parent) && parent.argumentExpression === node) return parent;
-  return ts.isExpression(node) ? node : undefined;
+  let expression =
+    ts.isPropertyAccessExpression(parent) && parent.name === node
+      ? parent
+      : ts.isElementAccessExpression(parent) && parent.argumentExpression === node
+        ? parent
+        : ts.isExpression(node)
+          ? node
+          : undefined;
+  if (!expression) return undefined;
+  while (true) {
+    const enclosing: ts.Node = expression.parent;
+    if (
+      ts.isParenthesizedExpression(enclosing) ||
+      ts.isNonNullExpression(enclosing) ||
+      ts.isAsExpression(enclosing) ||
+      ts.isTypeAssertionExpression(enclosing) ||
+      ts.isSatisfiesExpression(enclosing)
+    )
+      expression = enclosing;
+    else if (callResult && ts.isCallExpression(enclosing) && enclosing.expression === expression) {
+      expression = enclosing;
+      callResult = false;
+    } else return expression;
+  }
+}
+
+function referenceAccess(node: ts.Node): "read" | "write" | "readwrite" | "delete" {
+  const expression = useExpression(node);
+  if (!expression) return "read";
+  const parent = expression.parent;
+  if (
+    ts.isBinaryExpression(parent) &&
+    parent.left === expression &&
+    parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+    parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+  )
+    return parent.operatorToken.kind === ts.SyntaxKind.EqualsToken ? "write" : "readwrite";
+  if (
+    (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
+    (parent.operator === ts.SyntaxKind.PlusPlusToken ||
+      parent.operator === ts.SyntaxKind.MinusMinusToken)
+  )
+    return "readwrite";
+  if (ts.isDeleteExpression(parent)) return "delete";
+  return "read";
 }
 
 /** Primitive values are copies; objects/functions retain representation identity in JS. */
@@ -205,37 +255,18 @@ function hasIdentity(checker: ts.TypeChecker, node: ts.Node): boolean {
   return type.isUnion() ? type.types.some(identity) : identity(type);
 }
 
-function exposes(checker: ts.TypeChecker, node: ts.Node, callResult = false): boolean {
+function exposes(
+  checker: ts.TypeChecker,
+  node: ts.Node,
+  callResult = false,
+  getterRead = false,
+): boolean {
   if (ts.isBindingElement(node)) return hasIdentity(checker, node.name);
-  let expression = useExpression(node);
+  const expression = useExpression(node, callResult);
   if (!expression) return false;
-  if (
-    callResult &&
-    ts.isCallExpression(expression.parent) &&
-    expression.parent.expression === expression
-  )
-    expression = expression.parent;
-  while (
-    ts.isParenthesizedExpression(expression.parent) ||
-    ts.isNonNullExpression(expression.parent) ||
-    ts.isAsExpression(expression.parent)
-  )
-    expression = expression.parent;
-  const parent = expression.parent;
-  if (
-    ts.isBinaryExpression(parent) &&
-    parent.left === expression &&
-    parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-    parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-  )
-    return true;
-  if (
-    (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) &&
-    (parent.operator === ts.SyntaxKind.PlusPlusToken ||
-      parent.operator === ts.SyntaxKind.MinusMinusToken)
-  )
-    return true;
-  if (ts.isDeleteExpression(parent)) return true;
+  // A compound update reads the getter's value and separately invokes the
+  // setter. Incrementing a copied primitive does not mutate its backing field.
+  if (!getterRead && referenceAccess(node) !== "read") return true;
   return hasIdentity(checker, expression);
 }
 
@@ -278,6 +309,7 @@ export function buildModel(
   const items: Item[] = [];
   const bySymbol = new Map<ts.Symbol, Item>();
   const byNode = new Map<ts.Node, Item>();
+  const accessors = new Map<Item, { get?: Item; set?: Item }>();
   const aliases = new Map<ts.Symbol, ts.Symbol>();
   const canonical = (symbol: ts.Symbol): ts.Symbol => {
     const cached = aliases.get(symbol);
@@ -297,9 +329,7 @@ export function buildModel(
       : checker.getSymbolAtLocation(node);
     return symbol ? canonical(symbol) : undefined;
   };
-  const itemAt = (node: ts.Node): Item | undefined => {
-    const symbol = symbolAt(node);
-    if (!symbol) return undefined;
+  const declarationItem = (symbol: ts.Symbol): Item | undefined => {
     const direct = bySymbol.get(symbol);
     if (direct) return direct;
     // Instantiations can produce transient symbols with original declarations.
@@ -312,6 +342,21 @@ export function buildModel(
     }
     return undefined;
   };
+  const accessedItems = (item: Item, node: ts.Node): Item[] => {
+    const pair = accessors.get(item);
+    if (!pair) return [item];
+    const access = referenceAccess(node);
+    const selected: Item[] = [];
+    if ((access === "read" || access === "readwrite") && pair.get) selected.push(pair.get);
+    if ((access === "write" || access === "readwrite") && pair.set) selected.push(pair.set);
+    return selected;
+  };
+  const itemsAt = (node: ts.Node): Item[] => {
+    const symbol = symbolAt(node);
+    const item = symbol && declarationItem(symbol);
+    return item ? accessedItems(item, node) : [];
+  };
+  const itemAt = (node: ts.Node): Item | undefined => itemsAt(node)[0];
   const location = (node: ts.Node): Location => {
     const file = node.getSourceFile();
     const position = file.getLineAndCharacterOfPosition(node.getStart(file));
@@ -405,7 +450,12 @@ export function buildModel(
           : undefined;
         const symbol = named ? symbolAt(named) : exported ? canonical(exported) : undefined;
         const existing = symbol && bySymbol.get(symbol);
-        if (existing) {
+        const accessor = ts.isGetAccessorDeclaration(node)
+          ? "get"
+          : ts.isSetAccessorDeclaration(node)
+            ? "set"
+            : undefined;
+        if (existing && !accessor) {
           if (kind === "function" && functionBody(node) && !functionBody(existing.node))
             existing.node = node;
           byNode.set(node, existing);
@@ -416,13 +466,20 @@ export function buildModel(
             if (ts.isModuleDeclaration(at)) namespace.unshift(at.name.getText(file));
           const name = `${namespace.length ? `${namespace.join(".")}.` : ""}${named ? named.getText(file) : "default"}`;
           const parent = topLevel(node) ? undefined : owner;
-          const key = parent
+          const baseKey = parent
             ? `${parent.key}#${name}`
             : `${slash(path.relative(reportingRoot, file.fileName))}#${name}`;
+          const key = accessor ? `${baseKey}@${accessor}` : baseKey;
           const item: Item = { key, name, kind, node, file, ...(parent ? { owner: parent } : {}) };
           items.push(item);
           byNode.set(node, item);
-          if (symbol) bySymbol.set(symbol, item);
+          if (symbol && !existing) bySymbol.set(symbol, item);
+          if (accessor) {
+            const pair = existing ? (accessors.get(existing) ?? {}) : {};
+            pair[accessor] = item;
+            accessors.set(item, pair);
+            if (existing) accessors.set(existing, pair);
+          }
           owner = item;
         }
       }
@@ -522,7 +579,8 @@ export function buildModel(
       typeOnly,
       exposes:
         item.kind === "field" || wrappers.has(item)
-          ? exposes(checker, node, wrappers.has(item))
+          ? ts.isSetAccessorDeclaration(item.node) ||
+            exposes(checker, node, wrappers.has(item), ts.isGetAccessorDeclaration(item.node))
           : false,
       ...(holder ? { holder } : {}),
     });
@@ -536,9 +594,7 @@ export function buildModel(
   };
   for (const file of files) {
     if (tests.has(file)) continue;
-    const work: { node: ts.Node; holder?: Item; importedTypeOnly: boolean }[] = [
-      { node: file, importedTypeOnly: false },
-    ];
+    const work: { node: ts.Node; holder?: Item }[] = [{ node: file }];
     while (work.length) {
       const current = work.pop();
       if (!current) break;
@@ -580,25 +636,23 @@ export function buildModel(
         }
         continue;
       }
-      let importedTypeOnly = current.importedTypeOnly;
       if (referenceName(node)) {
         const original = checker.getSymbolAtLocation(node);
-        importedTypeOnly =
-          importedTypeOnly ||
-          Boolean(
-            original?.declarations?.some(
-              (declaration) =>
-                (ts.isImportSpecifier(declaration) &&
-                  (declaration.isTypeOnly ||
-                    (ts.isImportClause(declaration.parent.parent) &&
-                      declaration.parent.parent.isTypeOnly))) ||
-                (ts.isImportClause(declaration) && declaration.isTypeOnly) ||
-                (ts.isNamespaceImport(declaration) &&
-                  ts.isImportClause(declaration.parent) &&
-                  declaration.parent.isTypeOnly),
-            ),
-          );
-        const item = itemAt(node);
+        const importedTypeOnly = Boolean(
+          original?.declarations?.some(
+            (declaration) =>
+              (ts.isImportSpecifier(declaration) &&
+                (declaration.isTypeOnly ||
+                  (ts.isImportClause(declaration.parent.parent) &&
+                    declaration.parent.parent.isTypeOnly))) ||
+              (ts.isImportClause(declaration) && declaration.isTypeOnly) ||
+              (ts.isNamespaceImport(declaration) &&
+                ts.isImportClause(declaration.parent) &&
+                declaration.parent.isTypeOnly),
+          ),
+        );
+        const selected = itemsAt(node);
+        const item = selected[0];
         const inlinedEnum =
           item &&
           ts.isEnumDeclaration(item.node) &&
@@ -629,7 +683,7 @@ export function buildModel(
           if (target && target !== file)
             modules.push({ from: file, to: target, node, typeOnly, name: specifier.getText(file) });
         }
-        if (item) add(item, node, holder, typeOnly);
+        for (const item of selected) add(item, node, holder, typeOnly);
       }
       // Object destructuring has its own local binding symbols; resolve the
       // source property's symbol through its actual inferred type.
@@ -640,8 +694,9 @@ export function buildModel(
             checker.getTypeAtLocation(node.parent),
             key.text,
           );
-          const item = symbol && bySymbol.get(canonical(symbol));
-          if (item) add(item, node, holder, false);
+          const item = symbol && declarationItem(canonical(symbol));
+          if (item)
+            for (const selected of accessedItems(item, node)) add(selected, node, holder, false);
         }
       }
       if (
@@ -663,7 +718,7 @@ export function buildModel(
       const nested = children(node);
       for (let i = nested.length - 1; i >= 0; i--) {
         const child = nested[i];
-        if (child) work.push({ node: child, importedTypeOnly, ...(holder ? { holder } : {}) });
+        if (child) work.push({ node: child, ...(holder ? { holder } : {}) });
       }
     }
   }

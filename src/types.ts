@@ -36,6 +36,7 @@ export interface AnalysisError {
 
 export interface Report {
   version: 1;
+  compilerVersion: string;
   root: string;
   project: string;
   files: number;

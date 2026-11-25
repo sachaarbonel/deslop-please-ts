@@ -24,6 +24,7 @@ export function analyzeProject(projectPath: string, options: AnalyzeOptions = {}
   const root = path.resolve(options.root ?? configRoot);
   const report: Report = {
     version: 1,
+    compilerVersion: ts.version,
     root,
     project,
     files: 0,

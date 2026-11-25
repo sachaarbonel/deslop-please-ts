@@ -285,7 +285,7 @@ function shallowModules(model: Model): Diagnostic[] {
     diagnostics.push({
       rule: "shallow-module",
       key: boundary,
-      severity: "error",
+      severity: "warning",
       message: `${boundary} shows ${shown.length} of its ${total.length} working functions to outside consumers`,
       location: model.location(first.node),
       related: evidence(model, consumed),
@@ -367,10 +367,11 @@ export function check(model: Model): Diagnostic[] {
     const first = members[0];
     if (!first) continue;
     const names = members.map((item) => item.key).sort(compare);
+    const typeOnly = ties.length > 0 && ties.every((reference) => reference.typeOnly);
     diagnostics.push({
       rule: "tangle",
       key: names.join(","),
-      severity: "error",
+      severity: typeOnly ? "warning" : "error",
       message: `${members.length} things know each other in a circle across ${new Set(members.map((item) => item.file)).size} source modules`,
       location: related[0]?.location ?? model.location(first.node),
       related,

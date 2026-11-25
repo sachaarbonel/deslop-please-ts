@@ -1,39 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { analyzeProject } from "../dist/index.js";
+import { fixture } from "./fixture.mjs";
 
 const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
-
-function fixture(t, files, compilerOptions = {}) {
-  const root = mkdtempSync(join(tmpdir(), "deslop-please-ts-test-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  writeFileSync(
-    join(root, "tsconfig.json"),
-    JSON.stringify({
-      compilerOptions: {
-        target: "ES2022",
-        module: "ESNext",
-        moduleResolution: "Bundler",
-        strict: true,
-        noEmit: true,
-        types: [],
-        lib: ["ES2022"],
-        ...compilerOptions,
-      },
-      include: ["**/*.ts"],
-    }),
-  );
-  for (const [file, source] of Object.entries(files)) {
-    mkdirSync(dirname(join(root, file)), { recursive: true });
-    writeFileSync(join(root, file), source);
-  }
-  return { root, project: join(root, "tsconfig.json") };
-}
 
 function check(project, options) {
   const report = analyzeProject(project, options);
@@ -156,7 +131,7 @@ export function left(n: number): number { return n > 0 ? callRight(n - 1) : n; }
       "relay.ts": `export { right } from './right';`,
       "right.ts": recursivePair["right.ts"],
     },
-    { baseUrl: ".", paths: { "@api": ["./relay.ts"] } },
+    { paths: { "@api": ["./relay.ts"] } },
   );
   const report = check(project);
   assert.equal(rule(report, "module-cycle").length, 1);

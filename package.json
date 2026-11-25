@@ -1,6 +1,6 @@
 {
   "name": "deslop-please-ts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Compiler-aware TypeScript architectural checks for deep modules and narrow interfaces",
   "homepage": "https://github.com/sachaarbonel/deslop-please-ts#readme",
   "bugs": {
@@ -36,12 +36,13 @@
     "check": "npm run format:check && npm test",
     "prepack": "npm run build"
   },
-  "dependencies": {
-    "typescript": "5.9.3"
-  },
   "devDependencies": {
     "@types/node": "22.20.4",
-    "oxfmt": "0.71.0"
+    "oxfmt": "0.71.0",
+    "typescript": "5.9.3"
+  },
+  "peerDependencies": {
+    "typescript": "~5.9.3 || ~6.0.3"
   },
   "engines": {
     "node": ">=22.12"
